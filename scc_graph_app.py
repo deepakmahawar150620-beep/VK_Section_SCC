@@ -89,7 +89,7 @@ def weighted_risk_score(row):
 # --------------------------
 df['SCC Score'] = df.apply(scc_risk_score, axis=1)
 df['Weighted Risk Score'] = df.apply(weighted_risk_score, axis=1)
-df['SCC Risk Level'] = pd.cut(df['SCC Score'], bins=[-1, 15, 30, 60], labels=['Low', 'Moderate', 'High'])
+df['SCC Risk Level'] = pd.cut(df['SCC Score'], bins=[-1, 19, 34, 55], labels=['Low', 'Moderate', 'High'])
 
 st.subheader("📄 SCC Risk Classification Table")
 st.dataframe(df, use_container_width=True)
