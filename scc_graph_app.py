@@ -54,6 +54,61 @@ if 'Hoop stress% of SMYS' in df.columns:
         df['Hoop stress% of SMYS'] *= 100
 
 # --------------------------
+# RISK SCORING FUNCTIONS
+# --------------------------
+def scc_risk_score(row):
+    score = 0
+    if isinstance(row['CoatingType'], str) and 'plant cte' in row['CoatingType'].lower():
+        score += 2
+    try:
+        if float(row['Soil Resistivity (Ω-cm)']) < 10000:
+            score += 2
+    except: pass
+    try:
+        if float(str(row['Hoop stress% of SMYS']).replace('%', '').strip()) >= 60:
+            score += 2
+    except: pass
+    try:
+        if float(row['Pipe Age']) >= 20:
+            score += 1
+    except: pass
+    try:
+        if float(row['Temperature']) >= 35:
+            score += 1
+    except: pass
+    return score
+
+def weighted_risk_score(row):
+    try:
+        stress = float(str(row['Hoop stress% of SMYS']).replace('%', '').strip())
+        distance = float(row['Distance from Pump(KM)'])
+        temp = float(row['Temperature'])
+        resistivity = float(row['Soil Resistivity (Ω-cm)'])
+        resistivity_risk = 10000 / (resistivity + 1)
+        return 6 * stress + 0.2 * distance + 1.5 * temp + resistivity_risk
+    except:
+        return 0
+
+# --------------------------
+# CALCULATE AND DISPLAY SCC RISK
+# --------------------------
+df['SCC Score'] = df.apply(scc_risk_score, axis=1)
+df['Weighted Risk Score'] = df.apply(weighted_risk_score, axis=1)
+df['SCC Risk Level'] = pd.cut(df['SCC Score'], bins=[-1, 3, 5, 10], labels=['Low', 'Moderate', 'High'])
+
+st.subheader("📄 SCC Risk Classification Table")
+st.dataframe(df, use_container_width=True)
+st.download_button("📥 Download Full Risk Data", df.to_csv(index=False), file_name="scc_risk_assessment.csv")
+
+# --------------------------
+# TOP 50 HIGH-RISK LOCATIONS
+# --------------------------
+top_50 = df[df['SCC Risk Level'] == 'High'].sort_values(by='Weighted Risk Score', ascending=False).head(50)
+st.subheader("🔥 Top 50 High-Risk Locations")
+st.dataframe(top_50, use_container_width=True)
+st.download_button("⬇️ Download Top 50 High Risk", top_50.to_csv(index=False), file_name="top_50_scc_risks.csv")
+
+# --------------------------
 # PLOT OPTIONS
 # --------------------------
 plot_columns = {
@@ -84,13 +139,11 @@ fig.add_trace(go.Scatter(
     marker=dict(size=6)
 ))
 
-# Optional threshold lines
 if label == 'Hoop Stress (% of SMYS)':
     fig.add_shape(type='line',
                   x0=df['Stationing (m)'].min(), x1=df['Stationing (m)'].max(),
                   y0=60, y1=60,
                   line=dict(color='red', dash='dash'))
-
 elif label == 'OFF PSP (-ve Volt)':
     for yval in [0.85, 1.2]:
         fig.add_shape(type='line',
