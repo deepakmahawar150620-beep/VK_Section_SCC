@@ -58,34 +58,29 @@ if 'Hoop stress% of SMYS' in df.columns:
 # --------------------------
 def scc_risk_score(row):
     score = 0
-    if isinstance(row['CoatingType'], str) and 'plant cte' in row['CoatingType'].lower():
-        score += 2
     try:
-        if float(row['Soil Resistivity (Ω-cm)']) < 10000:
-            score += 2
-    except: pass
-    try:
-        if float(str(row['Hoop stress% of SMYS']).replace('%', '').strip()) >= 60:
-            score += 2
-    except: pass
-    try:
-        if float(row['Pipe Age']) >= 20:
-            score += 1
-    except: pass
-    try:
-        if float(row['Temperature']) >= 35:
-            score += 1
-    except: pass
+        if float(row['Hoop stress% of SMYS']) >= 60:
+            score += 10
+        if isinstance(row['CoatingType'], str) and 'plant cte' in row['CoatingType'].lower():
+            score += 10
+        if float(row['Distance from Pump(KM)']) < 32:
+            score += 10
+        if float(row['OFF PSP (VE V)']) > 1.2:
+            score += 5
+        if float(row['Pipe Age']) > 10:
+            score += 10
+        if float(row['Temperature']) > 38:
+            score += 10
+    except:
+        pass
     return score
 
 def weighted_risk_score(row):
     try:
-        stress = float(str(row['Hoop stress% of SMYS']).replace('%', '').strip())
+        stress = float(row['Hoop stress% of SMYS'])
         distance = float(row['Distance from Pump(KM)'])
-        temp = float(row['Temperature'])
-        resistivity = float(row['Soil Resistivity (Ω-cm)'])
-        resistivity_risk = 10000 / (resistivity + 1)
-        return 6 * stress + 0.2 * distance + 1.5 * temp + resistivity_risk
+        psp = float(row['OFF PSP (VE V)'])
+        return 0.6 * stress + 0.2 * distance + 0.2 * psp
     except:
         return 0
 
@@ -94,7 +89,7 @@ def weighted_risk_score(row):
 # --------------------------
 df['SCC Score'] = df.apply(scc_risk_score, axis=1)
 df['Weighted Risk Score'] = df.apply(weighted_risk_score, axis=1)
-df['SCC Risk Level'] = pd.cut(df['SCC Score'], bins=[-1, 3, 5, 10], labels=['Low', 'Moderate', 'High'])
+df['SCC Risk Level'] = pd.cut(df['SCC Score'], bins=[-1, 15, 30, 60], labels=['Low', 'Moderate', 'High'])
 
 st.subheader("📄 SCC Risk Classification Table")
 st.dataframe(df, use_container_width=True)
