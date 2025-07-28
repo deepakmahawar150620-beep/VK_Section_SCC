@@ -179,9 +179,11 @@ st.download_button(
 )
 
 # --------------------------
-# MAP VIEW OF PIPELINE AND TOP 50
+# MAP VIEW TOGGLE AND DISPLAY
 # --------------------------
-if {'LATITUDE', 'LONGITUDE'}.issubset(df.columns):
+show_map = st.checkbox("🗺️ Show Map with Top 50 High-Risk Points")
+
+if show_map and {'LATITUDE', 'LONGITUDE'}.issubset(df.columns):
     st.subheader("🗺️ Pipeline Map View with Top 50 High-Risk Points")
 
     m = folium.Map(location=[df['LATITUDE'].mean(), df['LONGITUDE'].mean()], zoom_start=10)
