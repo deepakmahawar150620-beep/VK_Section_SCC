@@ -4,3 +4,5 @@ openpyxl
 plotly>=5.3.1
 kaleido==0.2.1
 xlsxwriter
+folium
+streamlit-folium
