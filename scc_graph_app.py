@@ -181,20 +181,20 @@ st.download_button(
 # --------------------------
 # MAP VIEW OF PIPELINE AND TOP 50
 # --------------------------
-if {'Latitude', 'Longitude'}.issubset(df.columns):
+if {'LATITUDE', 'LONGITUDE'}.issubset(df.columns):
     st.subheader("🗺️ Pipeline Map View with Top 50 High-Risk Points")
 
-    m = folium.Map(location=[df['Latitude'].mean(), df['Longitude'].mean()], zoom_start=8)
+    m = folium.Map(location=[df['LATITUDE'].mean(), df['LONGITUDE'].mean()], zoom_start=10)
 
     # Add pipeline polyline
-    coords = df[['Latitude', 'Longitude']].dropna().values.tolist()
+    coords = df[['LATITUDE', 'LONGITUDE']].dropna().values.tolist()
     folium.PolyLine(locations=coords, color="blue", weight=3, popup="Pipeline").add_to(m)
 
     # Add Top 50 markers
     cluster = MarkerCluster().add_to(m)
     for _, row in top_50.iterrows():
         folium.Marker(
-            location=[row['Latitude'], row['Longitude']],
+            location=[row['LATITUDE'], row['LONGITUDE']],
             popup=f"Stationing: {row['Stationing (m)']}, Score: {row['SCC Score']}",
             icon=folium.Icon(color='red', icon='exclamation-sign')
         ).add_to(cluster)
