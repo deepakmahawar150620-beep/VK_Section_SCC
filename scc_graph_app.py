@@ -15,10 +15,9 @@ st.set_page_config(page_title="📊 SCC Risk Graph Explorer", layout="centered")
 st.title("📈 SCC Risk Graph Explorer")
 
 # --------------------------
-# UPLOAD EXCEL FILES
+# UPLOAD EXCEL FILE
 # --------------------------
 uploaded_risk_file = st.file_uploader("📤 Upload Risk Excel file (.xlsx)", type=["xlsx"], key="risk")
-uploaded_gps_file = st.file_uploader("📍 Upload GPS Coordinate Excel file (.xlsx)", type=["xlsx"], key="gps")
 
 # --------------------------
 # LOAD DATA
@@ -42,13 +41,6 @@ if uploaded_risk_file:
 else:
     df = load_default_data()
     st.info("ℹ️ Showing default data from GitHub. Upload your Excel file to override.")
-
-# Merge GPS data if uploaded
-if uploaded_gps_file:
-    gps_df = load_excel_data(uploaded_gps_file)
-    merge_col = st.selectbox("🔗 Select column to merge on", list(set(df.columns) & set(gps_df.columns)))
-    df = df.merge(gps_df[['LATITUDE', 'LONGITUDE', merge_col]], on=merge_col, how='left')
-    st.success("📌 GPS coordinates merged with risk data.")
 
 # --------------------------
 # CLEANING / CONVERSIONS
@@ -195,7 +187,8 @@ if show_map and {'LATITUDE', 'LONGITUDE'}.issubset(top_50.columns):
 
     # Add pipeline polyline
     coords = df[['LATITUDE', 'LONGITUDE']].dropna().values.tolist()
-    folium.PolyLine(locations=coords, color="blue", weight=3, popup="Pipeline").add_to(m)
+    if len(coords) > 1:
+        folium.PolyLine(locations=coords, color="blue", weight=3, popup="Pipeline").add_to(m)
 
     # Add Top 50 markers
     cluster = MarkerCluster().add_to(m)
@@ -207,3 +200,6 @@ if show_map and {'LATITUDE', 'LONGITUDE'}.issubset(top_50.columns):
         ).add_to(cluster)
 
     st_data = st_folium(m, width=700, height=500)
+else:
+    if show_map:
+        st.warning("⚠️ GPS data not found in top 50 records. Please ensure LATITUDE and LONGITUDE are included.")
