@@ -2,45 +2,46 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.io as pio
+import kaleido  # ensure kaleido is imported for write_image
 from io import BytesIO, StringIO
 
-# Page setup
 st.set_page_config(page_title="SCC Risk Explorer", layout="centered")
 st.title("📊 SCC Risk Assessment & Graph Explorer")
 
-# Display risk criteria
 criteria = {
     "Criterion": [
-        "Hoop stress > 60% SMYS", "Soil resistivity < 5000 Ω·cm",
-        "Distance from pump ≤ 32 km", "Pipe age > 10 yrs (≥30 high)",
-        "Temperature > 38 °C", "Coating = CTE or coal‑tar enamel",
+        "Hoop stress > 60% SMYS",
+        "Soil resistivity < 5000 Ω·cm",
+        "Distance ≤ 32 km",
+        "Pipe age > 10 yrs (≥30 high)",
+        "Temp > 38 °C",
+        "Coating = CTE or coal‑tar enamel",
         "OFF PSP > −1.2 V"
     ],
     "Description": [
-        "Stress threshold", "Corrosive soil", "Proximity risk",
-        "Older pipe", "Thermal acceleration", "Vulnerable coating",
-        "Over-protection risk"
+        "High mechanical stress",
+        "Corrosive soil",
+        "Proximity risk",
+        "Older pipe",
+        "Thermal acceleration",
+        "Vulnerable coating",
+        "Over‑protection"
     ]
 }
-st.subheader("Risk Assessment Criteria")
+st.subheader("Risk Criteria")
 st.table(pd.DataFrame(criteria))
 
-# Load and cache Excel from GitHub
-@st.cache_data(show_spinner=True)
+@st.cache_data
 def load_data():
-    url = (
-        "https://raw.githubusercontent.com/"
-        "deepakmahawar150620-beep/SCC_Pawan/main/Pipeline_data.xlsx"
-    )
+    url = "https://raw.githubusercontent.com/deepakmahawar150620-beep/SCC_Pawan/main/Pipeline_data.xlsx"
     df = pd.read_excel(url, engine="openpyxl")
     df.columns = df.columns.str.strip()
     return df
 
 df0 = load_data()
-st.subheader("Data Preview (first 50 rows)")
+st.subheader("Data Preview")
 st.dataframe(df0.head(50), height=200)
 
-# Ensure required columns exist
 required = [
     "Stationing (m)", "Hoop stress% of SMYS", "Soil Resistivity (Ω-cm)",
     "Distance from Pump(KM)", "Pipe Age", "Temperature",
@@ -51,7 +52,6 @@ if missing:
     st.error(f"Missing columns: {missing}")
     st.stop()
 
-# Compute and cache risk flags and scoring
 @st.cache_data
 def compute_risk(df):
     d = df[required].dropna(subset=["Stationing (m)"]).fillna({
@@ -65,7 +65,8 @@ def compute_risk(df):
     }).copy()
 
     for col in required:
-        d[col] = d[col].astype(float, errors='ignore') if col != "CoatingType" else d[col].astype(str)
+        if col != "CoatingType":
+            d[col] = pd.to_numeric(d[col], errors="coerce").fillna(0)
 
     def flags(r):
         return {
@@ -75,53 +76,46 @@ def compute_risk(df):
             "Age≥10": r["Pipe Age"] >= 10,
             "Temp>38": r["Temperature"] > 38,
             "CoatingHigh": any(x in str(r["CoatingType"]).upper() for x in ["CTE", "COAL TAR"]),
-            "OFF-PSP>−1.2": r["OFF PSP (VE V)"] > -1.2
+            "OFF‑PSP>‑1.2": r["OFF PSP (VE V)"] > -1.2
         }
 
-    flags_df = d.apply(lambda row: pd.Series(flags(row)), axis=1)
-    dfc = pd.concat([d, flags_df], axis=1)
-    dfc["Risk Score"] = flags_df.sum(axis=1)
+    flag_df = d.apply(lambda r: pd.Series(flags(r)), axis=1)
+    dfc = pd.concat([d, flag_df], axis=1)
+    dfc["Risk Score"] = flag_df.sum(axis=1)
     dfc["SCC Risk"] = dfc["Risk Score"].apply(lambda s: "High" if s >= 4 else ("Medium" if s >= 2 else "Low"))
     return dfc
 
 df = compute_risk(df0)
-st.subheader("Computed Risk Table (sample)")
+st.subheader("Risk Table Sample")
 st.dataframe(df.head(50), height=200)
 
-# Interactive filtering box
-st.subheader("🔍 Fast Interactive Filter")
+st.subheader("Interactive Filtering")
 df_filt = st.data_editor(df, num_rows="fixed", use_container_width=True)
 st.dataframe(df_filt, height=300)
 
-# Top 50 highest-risk rows
 top50 = df.sort_values("Risk Score", ascending=False).head(50)
 
-# Plot explorer
-st.subheader("📈 Parameter vs Stationing Plot")
-options = [
+st.subheader("Plot Explorer")
+param = st.selectbox("Select parameter:", [
     "OFF PSP (VE V)", "Hoop stress% of SMYS", "Soil Resistivity (Ω-cm)",
     "Distance from Pump(KM)", "Temperature", "Pipe Age"
-]
-param = st.selectbox("Select parameter:", options)
+])
 
-# Safely create Plotly figure using try/except
 try:
     fig = go.Figure(go.Scatter(
         x=df["Stationing (m)"], y=df[param],
-        mode="lines+markers", name=param,
-        line=dict(width=2), marker=dict(size=5)
+        mode="lines+markers", line=dict(width=2), marker=dict(size=5)
     ))
 except ValueError:
     fig = go.Figure(go.Scatter(
         x=df["Stationing (m)"].tolist(), y=df[param].tolist(),
-        mode="lines+markers", name=param,
-        line=dict(width=2), marker=dict(size=5)
+        mode="lines+markers", line=dict(width=2), marker=dict(size=5)
     ))
 
 if param == "Hoop stress% of SMYS":
     fig.add_hline(y=60, line_color="red", line_dash="dash", annotation_text="60% SMYS")
 elif param == "OFF PSP (VE V)":
-    fig.add_hline(y=-1.2, line_color="red", line_dash="dash", annotation_text="-1.2 V")
+    fig.add_hline(y=-1.2, line_color="red", line_dash="dash", annotation_text="-1.2 V")
 
 fig.update_layout(
     title=f"Stationing vs {param}",
@@ -130,35 +124,25 @@ fig.update_layout(
 )
 st.plotly_chart(fig, use_container_width=True)
 
-# Download graph as HTML
-html_buf = StringIO()
-pio.write_html(fig, html_buf, include_plotlyjs="cdn")
-st.download_button(
-    "⬇️ Download Plot as HTML",
-    data=html_buf.getvalue(),
-    file_name=f"{param.replace(' ', '_')}_graph.html",
-    mime="text/html"
-)
+htmlbuf = StringIO()
+pio.write_html(fig, htmlbuf, include_plotlyjs="cdn")
+st.download_button("⬇️ Download Plot as HTML", htmlbuf.getvalue(),
+                   file_name=f"{param.replace(' ', '_')}_plot.html", mime="text/html")
 
-# Excel exports
-def to_excel(dfs, sheet_names):
-    bio = BytesIO()
-    with pd.ExcelWriter(bio, engine="xlsxwriter") as writer:
-        for dfx, name in zip(dfs, sheet_names):
+def to_excel(dfs, sheets):
+    buf = BytesIO()
+    with pd.ExcelWriter(buf, engine="xlsxwriter") as writer:
+        for dfx, name in zip(dfs, sheets):
             dfx.to_excel(writer, sheet_name=name, index=False)
-    bio.seek(0)
-    return bio.getvalue()
+    buf.seek(0)
+    return buf.getvalue()
 
 bytes_all = to_excel([df], ["All_Rows"])
-bytes_top = to_excel([top50], ["Top_50_HighRisk"])
+bytes_top50 = to_excel([top50], ["Top50_HighRisk"])
 
-st.download_button(
-    "⬇️ Download Full Results (Excel)",
-    data=bytes_all, file_name="scc_all_results.xlsx",
-    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-)
-st.download_button(
-    "⬇️ Download Top 50 High‑Risk (Excel)",
-    data=bytes_top, file_name="scc_top50_highrisk.xlsx",
-    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-)
+st.download_button("⬇️ Download Full Results (Excel)", data=bytes_all,
+                   file_name="scc_all_results.xlsx",
+                   mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+st.download_button("⬇️ Download Top 50 High‑Risk (Excel)", data=bytes_top50,
+                   file_name="scc_top50_highrisk.xlsx",
+                   mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
