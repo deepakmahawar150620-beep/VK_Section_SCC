@@ -15,12 +15,13 @@ st.set_page_config(page_title="📊 SCC Risk Graph Explorer", layout="centered")
 st.title("📈 SCC Risk Graph Explorer")
 
 # --------------------------
-# UPLOAD EXCEL FILE
+# UPLOAD EXCEL FILES
 # --------------------------
-uploaded_file = st.file_uploader("📤 Upload Excel file (.xlsx)", type=["xlsx"])
+uploaded_risk_file = st.file_uploader("📤 Upload Risk Excel file (.xlsx)", type=["xlsx"], key="risk")
+uploaded_gps_file = st.file_uploader("📍 Upload GPS Coordinate Excel file (.xlsx)", type=["xlsx"], key="gps")
 
 # --------------------------
-# LOAD EXCEL DATA
+# LOAD DATA
 # --------------------------
 @st.cache_data(show_spinner=False)
 def load_excel_data(file):
@@ -35,15 +36,19 @@ def load_default_data():
     df.columns = df.columns.str.strip()
     return df
 
-# --------------------------
-# SELECT WHICH DATA TO USE
-# --------------------------
-if uploaded_file:
-    df = load_excel_data(uploaded_file)
-    st.success("✅ Uploaded file loaded successfully.")
+if uploaded_risk_file:
+    df = load_excel_data(uploaded_risk_file)
+    st.success("✅ Uploaded risk file loaded successfully.")
 else:
     df = load_default_data()
     st.info("ℹ️ Showing default data from GitHub. Upload your Excel file to override.")
+
+# Merge GPS data if uploaded
+if uploaded_gps_file:
+    gps_df = load_excel_data(uploaded_gps_file)
+    merge_col = st.selectbox("🔗 Select column to merge on", list(set(df.columns) & set(gps_df.columns)))
+    df = df.merge(gps_df[['LATITUDE', 'LONGITUDE', merge_col]], on=merge_col, how='left')
+    st.success("📌 GPS coordinates merged with risk data.")
 
 # --------------------------
 # CLEANING / CONVERSIONS
@@ -183,10 +188,10 @@ st.download_button(
 # --------------------------
 show_map = st.checkbox("🗺️ Show Map with Top 50 High-Risk Points")
 
-if show_map and {'LATITUDE', 'LONGITUDE'}.issubset(df.columns):
+if show_map and {'LATITUDE', 'LONGITUDE'}.issubset(top_50.columns):
     st.subheader("🗺️ Pipeline Map View with Top 50 High-Risk Points")
 
-    m = folium.Map(location=[df['LATITUDE'].mean(), df['LONGITUDE'].mean()], zoom_start=10)
+    m = folium.Map(location=[top_50['LATITUDE'].mean(), top_50['LONGITUDE'].mean()], zoom_start=10)
 
     # Add pipeline polyline
     coords = df[['LATITUDE', 'LONGITUDE']].dropna().values.tolist()
@@ -194,7 +199,7 @@ if show_map and {'LATITUDE', 'LONGITUDE'}.issubset(df.columns):
 
     # Add Top 50 markers
     cluster = MarkerCluster().add_to(m)
-    for _, row in top_50.iterrows():
+    for _, row in top_50.dropna(subset=['LATITUDE', 'LONGITUDE']).iterrows():
         folium.Marker(
             location=[row['LATITUDE'], row['LONGITUDE']],
             popup=f"Stationing: {row['Stationing (m)']}, Score: {row['SCC Score']}",
