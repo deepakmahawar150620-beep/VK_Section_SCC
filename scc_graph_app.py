@@ -8,62 +8,49 @@ import folium
 from streamlit_folium import st_folium
 from folium.plugins import MarkerCluster
 
-# --------------------------
-# PAGE CONFIG
-# --------------------------
+# -------------------------- PAGE CONFIG --------------------------
 st.set_page_config(page_title="📊 SCC Risk Graph Explorer", layout="centered")
 st.title("📈 SCC Risk Graph Explorer")
 
-# --------------------------
-# UPLOAD EXCEL FILE, use session_state to cache filename
-# --------------------------
-if "uploaded_file" not in st.session_state:
-    st.session_state.uploaded_file = None
-
-uploaded = st.file_uploader("📤 Upload Risk Excel file (.xlsx)", type=["xlsx"], key="risk")
-if uploaded is not None:
-    st.session_state.uploaded_file = uploaded
-
-# --------------------------
-# LOAD DATA with caching
-# --------------------------
-@st.cache_data(show_spinner=False)
-def load_excel_data(file_bytes):
-    df = pd.read_excel(file_bytes, engine="openpyxl")
+# -------------------------- UPLOAD & CACHING --------------------------
+@st.cache_data(show_spinner=False,
+               hash_funcs={st.runtime.uploaded_file_manager.UploadedFile: lambda x: x.file_id})
+def load_excel_data(file_bytes: bytes):
+    df = pd.read_excel(io.BytesIO(file_bytes), engine="openpyxl")
     df.columns = df.columns.str.strip()
     return df
 
-@st.cache_data()
+@st.cache_data(show_spinner=False)
 def load_default_data():
     url = "https://raw.githubusercontent.com/deepakmahawar150620-beep/SCC_Pawan/main/Pipeline_data.xlsx"
     df = pd.read_excel(url, engine="openpyxl")
     df.columns = df.columns.str.strip()
     return df
 
-# Choose data source
-if st.session_state.uploaded_file:
-    df = load_excel_data(st.session_state.uploaded_file)
+uploaded_risk_file = st.file_uploader("📤 Upload Risk Excel file (.xlsx)", type=["xlsx"], key="risk_file")
+if uploaded_risk_file is not None:
+    raw = uploaded_risk_file.getvalue()
+    df = load_excel_data(raw)
     st.success("✅ Uploaded risk file loaded successfully.")
 else:
     df = load_default_data()
     st.info("ℹ️ Showing default data from GitHub. Upload your Excel file to override.")
 
-# --------------------------
-# ENSURE GPS COLUMNS
-# --------------------------
+# -------------------------- DEBUG PRINT --------------------------
+st.write("Detected columns:", df.columns.tolist())
+st.write("Sample rows (first 3):")
+st.dataframe(df.head(3), use_container_width=True)
+
+# -------------------------- ENSURE GPS COLUMNS --------------------------
 for col in ["LATITUDE", "LONGITUDE"]:
     if col not in df.columns:
         df[col] = np.nan
 
-# --------------------------
-# DISPLAY GPS PREVIEW
-# --------------------------
+# -------------------------- GPS PREVIEW --------------------------
 st.write("📍 GPS Preview (first valid rows):")
 st.dataframe(df[["Stationing (m)", "LATITUDE", "LONGITUDE"]].dropna().head(), use_container_width=True)
 
-# --------------------------
-# CLEANING / CONVERSIONS
-# --------------------------
+# -------------------------- CLEANING / CONVERSIONS --------------------------
 if "OFF PSP (VE V)" in df.columns:
     df["OFF PSP (VE V)"] = pd.to_numeric(df["OFF PSP (VE V)"], errors="coerce").abs()
 if "Hoop stress% of SMYS" in df.columns:
@@ -71,27 +58,20 @@ if "Hoop stress% of SMYS" in df.columns:
         df["Hoop stress% of SMYS"].astype(str).str.replace("%", ""),
         errors="coerce"
     )
-    if df["Hoop stress% of SMYS"].max() < 10:
+    if df["Hoop stress% of SMYS"].max(skipna=True) < 10:
         df["Hoop stress% of SMYS"] *= 100
 
-# --------------------------
-# RISK SCORING FUNCTIONS
-# --------------------------
+# -------------------------- RISK SCORING FUNCTIONS --------------------------
 def scc_risk_score(row):
     score = 0
     try:
-        if float(row["Hoop stress% of SMYS"]) >= 60:
-            score += 10
+        if float(row["Hoop stress% of SMYS"]) >= 60: score += 10
         if isinstance(row.get("CoatingType"), str) and "plant cte" in row["CoatingType"].lower():
             score += 10
-        if float(row["Distance from Pump(KM)"]) < 32:
-            score += 10
-        if float(row["OFF PSP (VE V)"]) > 1.2:
-            score += 5
-        if float(row["Pipe Age"]) > 10:
-            score += 10
-        if float(row["Temperature"]) > 38:
-            score += 10
+        if float(row["Distance from Pump(KM)"]) < 32: score += 10
+        if float(row["OFF PSP (VE V)"]) > 1.2: score += 5
+        if float(row["Pipe Age"]) > 10: score += 10
+        if float(row["Temperature"]) > 38: score += 10
     except:
         pass
     return score
@@ -99,44 +79,34 @@ def scc_risk_score(row):
 def weighted_risk_score(row):
     try:
         stress = float(row["Hoop stress% of SMYS"])
-        distance = float(row["Distance from Pump(KM)"])
+        dist = float(row["Distance from Pump(KM)"])
         psp = float(row["OFF PSP (VE V)"])
-        return 0.6 * stress + 0.2 * distance + 0.2 * psp
+        return 0.6 * stress + 0.2 * dist + 0.2 * psp
     except:
-        return 0
+        return 0.0
 
-# --------------------------
-# CALCULATE RISK AND ADD COLUMNS
-# --------------------------
+# -------------------------- CALCULATE SCC RISK --------------------------
 df["SCC Score"] = df.apply(scc_risk_score, axis=1)
 df["Weighted Risk Score"] = df.apply(weighted_risk_score, axis=1)
 df["SCC Risk Level"] = pd.cut(df["SCC Score"], bins=[-1, 19, 34, 55], labels=["Low", "Moderate", "High"])
 
-# --------------------------
-# REORDER to show GPS first
-# --------------------------
+# -------------------------- REORDER COLUMNS --------------------------
 col_order = ["LATITUDE", "LONGITUDE"] + [c for c in df.columns if c not in ["LATITUDE", "LONGITUDE"]]
 df = df[col_order]
 
-# --------------------------
-# FULL RISK TABLE
-# --------------------------
+# -------------------------- DISPLAY FULL RISK TABLE --------------------------
 st.subheader("📄 SCC Risk Classification Table")
 st.dataframe(df, use_container_width=True)
 st.download_button("📥 Download Full Risk Data", df.to_csv(index=False), file_name="scc_risk_assessment.csv")
 
-# --------------------------
-# TOP 50 HIGH-RISK
-# --------------------------
+# -------------------------- TOP 50 HIGH-RISK LOCATIONS --------------------------
 top_50 = df[df["SCC Risk Level"] == "High"].sort_values(by="Weighted Risk Score", ascending=False).head(50)
 top_50 = top_50[col_order]
-st.subheader("🔥 Top 50 High-Risk Locations")
+st.subheader("🔥 Top 50 High‑Risk Locations")
 st.dataframe(top_50, use_container_width=True)
 st.download_button("⬇️ Download Top 50 High Risk", top_50.to_csv(index=False), file_name="top_50_scc_risks.csv")
 
-# --------------------------
-# PLOT OPTIONS
-# --------------------------
+# -------------------------- PLOT OPTIONS --------------------------
 plot_columns = {
     "Depth (mm)": "Depth (mm)",
     "OFF PSP (VE V)": "OFF PSP (-ve Volt)",
@@ -151,11 +121,8 @@ plot_columns = {
 selected_col = st.selectbox("📌 Select a parameter to compare with Stationing:", list(plot_columns.keys()))
 label = plot_columns[selected_col]
 
-# --------------------------
-# GENERATE GRAPH
-# --------------------------
-fig = go.Figure()
-fig.add_trace(go.Scatter(
+# -------------------------- GENERATE THE GRAPH --------------------------
+fig = go.Figure(go.Scatter(
     x=df["Stationing (m)"],
     y=df[selected_col],
     mode="lines+markers",
@@ -168,40 +135,36 @@ if label == "Hoop Stress (% of SMYS)":
                   x0=df["Stationing (m)"].min(), x1=df["Stationing (m)"].max(),
                   y0=60, y1=60, line=dict(color="red", dash="dash"))
 elif label == "OFF PSP (-ve Volt)":
-    for yval in [0.85, 1.2]:
+    for y in [0.85, 1.2]:
         fig.add_shape(type="line",
                       x0=df["Stationing (m)"].min(), x1=df["Stationing (m)"].max(),
-                      y0=yval, y1=yval, line=dict(color="red", dash="dash"))
+                      y0=y, y1=y, line=dict(color="red", dash="dash"))
 
 fig.update_layout(
     title=f"Stationing vs {label}",
-    xaxis_title="Stationing (m)", yaxis_title=label,
-    height=500, template="plotly_white",
+    xaxis_title="Stationing (m)",
+    yaxis_title=label,
+    height=500,
+    template="plotly_white",
     xaxis=dict(showline=True, linecolor="black", mirror=True),
     yaxis=dict(showline=True, linecolor="black", mirror=True, gridcolor="lightgray"),
     margin=dict(l=60, r=40, t=50, b=60)
 )
 st.plotly_chart(fig, use_container_width=True)
 
-# --------------------------
-# DOWNLOAD GRAPH AS HTML
-# --------------------------
-html_buffer = io.StringIO()
-pio.write_html(fig, file=html_buffer, include_plotlyjs="cdn")
-st.download_button(
-    label="⬇️ Download Graph as HTML",
-    data=html_buffer.getvalue(),
-    file_name=f"{label.replace(' ', '_')}_graph.html",
-    mime="text/html"
-)
+# -------------------------- DOWNLOAD GRAPH --------------------------
+html_buf = io.StringIO()
+pio.write_html(fig, file=html_buf, include_plotlyjs="cdn")
+st.download_button(label="⬇️ Download Graph as HTML",
+                   data=html_buf.getvalue(),
+                   file_name=f"{label.replace(' ', '_')}_graph.html",
+                   mime="text/html")
 
-# --------------------------
-# MAP VIEW TOGGLE AND DISPLAY
-# --------------------------
-show_map = st.checkbox("🗺️ Show Map with Top 50 High-Risk Points")
+# -------------------------- MAP VIEW TOGGLE --------------------------
+show_map = st.checkbox("🗺️ Show Map with Top 50 High‑Risk Points")
 if show_map:
     if {"LATITUDE", "LONGITUDE"}.issubset(top_50.columns) and top_50[["LATITUDE", "LONGITUDE"]].notna().any(axis=None):
-        st.subheader("🗺️ Pipeline Map View with Top 50 High-Risk Points")
+        st.subheader("🗺️ Pipeline Map View with Top 50 High‑Risk Points")
         m = folium.Map(location=[top_50["LATITUDE"].mean(), top_50["LONGITUDE"].mean()], zoom_start=10)
         coords = df[["LATITUDE", "LONGITUDE"]].dropna().values.tolist()
         if len(coords) > 1:
@@ -210,13 +173,12 @@ if show_map:
         for _, row in top_50.dropna(subset=["LATITUDE", "LONGITUDE"]).iterrows():
             folium.Marker(
                 location=[row["LATITUDE"], row["LONGITUDE"]],
-                popup=f"Stationing: {row['Stationing (m)']}, Score: {row['SCC Score']}",
+                popup=f"Stationing: {row['Stationing (m)']} — Score: {row['SCC Score']}",
                 icon=folium.Icon(color="red", icon="exclamation-sign")
             ).add_to(cluster)
         st_folium(m, width=700, height=500)
     else:
-        st.warning("⚠️ GPS data not found in top 50 records. Please ensure LATITUDE and LONGITUDE are included.")
+        st.warning("⚠️ GPS data missing in Top‑50 records—cannot draw map.")
 
-    # Alternative quick map
-    st.write("🟢 Alternative: simple `st.map` view")
+    st.write("🟢 Alternative quick view via `st.map`")
     st.map(top_50.rename(columns={"LATITUDE": "latitude", "LONGITUDE": "longitude"}), zoom=10)
